@@ -114,11 +114,14 @@ var CURTAIN = (function () {
         if (text.length > remaining) text = text.slice(0, remaining);
         if (!text) return;
         var color = normalizeInkColor(run.color);
+        var slash = run.slash === true;
         var last = runs[runs.length - 1];
-        if (last && last.color === color) {
+        if (last && last.color === color && Boolean(last.slash) === slash) {
           last.text += text;
         } else {
-          runs.push({ text: text, color: color });
+          var normalizedRun = { text: text, color: color };
+          if (slash) normalizedRun.slash = true;
+          runs.push(normalizedRun);
         }
         total += text.length;
       });

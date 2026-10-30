@@ -111,6 +111,12 @@
     '}',
     '.mask-input { display: block; overflow-x: hidden; overflow-y: auto; pointer-events: auto; z-index: 2; }',
     '.mask-input div, .mask-input p { margin: 0; padding: 0; }',
+    // Keep the native strikeThrough format for selection editing and undo; paint it diagonally.
+    '.mask-input :is(s, strike, [style*="line-through"]), .mask-text [style*="line-through"], .peek-text [style*="line-through"] {',
+    '  text-decoration-color: transparent;',
+    '  background-image: linear-gradient(to bottom right, transparent calc(50% - 1px), #7c3aed calc(50% - 1px), #7c3aed calc(50% + 1px), transparent calc(50% + 1px));',
+    '  -webkit-box-decoration-break: clone; box-decoration-break: clone;',
+    '}',
     '.mask-placeholder {',
     '  position: absolute; inset: 0; z-index: 1; box-sizing: border-box;',
     '  overflow: hidden; pointer-events: none; opacity: 0.34;',
@@ -160,6 +166,8 @@
     '.practice-bar .practice-compare.is-active { background: #5eead4; border-color: #5eead4; color: #062a26; font-weight: 600; }',
     '.practice-bar .practice-clear.is-armed { color: #ffb4c0; border-color: rgba(255, 116, 136, 0.5); background: rgba(255, 116, 136, 0.1); }',
     '.practice-bar .practice-clear:disabled { opacity: 0.38; cursor: default; }',
+    '.practice-bar .practice-slash:disabled { opacity: 0.38; cursor: default; }',
+    '.practice-bar .practice-slash.is-active { color: #ddd0ff; border-color: #a78bfa; background: rgba(124, 58, 237, 0.22); }',
     '.practice-ink { display: inline-flex; align-items: center; gap: 5px; }',
     '.ink-dot { width: 10px; height: 10px; flex: none; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.45); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12); }',
     '.ink-dot.is-auto { background: linear-gradient(135deg, #ffffff 0 48%, #0b0d12 52% 100%); }',
@@ -524,11 +532,12 @@
       parts.forEach(function (part, index) {
         if (index > 0) container.appendChild(document.createElement('br'));
         if (!part) return;
-        if (run.color === 'auto') {
+        if (run.color === 'auto' && !run.slash) {
           container.appendChild(document.createTextNode(part));
         } else {
           var span = document.createElement('span');
-          span.style.color = run.color;
+          if (run.color !== 'auto') span.style.color = run.color;
+          if (run.slash) span.style.textDecorationLine = 'line-through';
           span.textContent = part;
           container.appendChild(span);
         }
@@ -541,7 +550,7 @@
     var total = 0;
     var auto = C.contrastColor(site.style.color).toLowerCase();
 
-    function push(text, color) {
+    function push(text, color, slash) {
       if (!text || total >= C.MAX_TEXT_LENGTH) return;
       text = String(text).replace(/\u200b/g, '');
       if (!text) return;
@@ -553,31 +562,36 @@
         normalized = 'auto';
       }
       var last = runs[runs.length - 1];
-      if (last && last.color === normalized) {
+      if (last && last.color === normalized && Boolean(last.slash) === Boolean(slash)) {
         last.text += text;
       } else {
-        runs.push({ text: text, color: normalized });
+        var run = { text: text, color: normalized };
+        if (slash) run.slash = true;
+        runs.push(run);
       }
       total += text.length;
     }
 
-    function walk(node, inherited) {
+    function walk(node, inherited, inheritedSlash) {
       if (node.nodeType === 3) {
-        push(node.nodeValue, inherited);
+        push(node.nodeValue, inherited, inheritedSlash);
         return;
       }
       if (node.nodeType !== 1) return;
       var tag = node.tagName;
       if (tag === 'BR') {
-        push('\n', inherited);
+        push('\n', inherited, inheritedSlash);
         return;
       }
       if (tag === 'SCRIPT' || tag === 'STYLE') return;
 
       var color = inherited;
+      var slash = inheritedSlash || tag === 'S' || tag === 'STRIKE';
       try {
-        var computed = cssColorToHex(getComputedStyle(node).color);
+        var style = getComputedStyle(node);
+        var computed = cssColorToHex(style.color);
         if (computed) color = computed;
+        if (style.textDecorationLine.indexOf('line-through') !== -1) slash = true;
       } catch (error) {
         /* 忽略 */
       }
@@ -586,11 +600,11 @@
       if (block) {
         var previous = runs[runs.length - 1];
         if (runs.length && previous && previous.text.slice(-1) !== '\n') {
-          push('\n', inherited);
+          push('\n', inherited, inheritedSlash);
         }
       }
       Array.prototype.forEach.call(node.childNodes, function (child) {
-        walk(child, color);
+        walk(child, color, slash);
       });
     }
 
@@ -649,6 +663,7 @@
     updateMaskPlaceholders();
     if (clearArmed) disarmClear();
     updateClearButton();
+    updateSlashButton();
     scheduleSave();
     updatePeekPanel();
     return { runs: runs, text: text };
@@ -666,6 +681,13 @@
     });
   }
 
+  function practiceSelection() {
+    // Native formatting can rescope window.getSelection() to the Shadow DOM host.
+    return shadow && typeof shadow.getSelection === 'function'
+      ? shadow.getSelection()
+      : window.getSelection();
+  }
+
   function activePracticeInput() {
     if (!shadow) return null;
     var mask = currentMask();
@@ -677,7 +699,7 @@
   function applyInkToInput(allowSelection) {
     var input = activePracticeInput();
     if (!input || shadow.activeElement !== input) return false;
-    var selection = window.getSelection();
+    var selection = practiceSelection();
     if (!selection || !selection.rangeCount) return false;
     var range = selection.getRangeAt(0);
     if (!input.contains(range.commonAncestorContainer) && range.commonAncestorContainer !== input) {
@@ -782,10 +804,11 @@
   }
 
   function savePracticeSelection() {
+    updateSlashButton();
     if (!shadow) return;
     var active = shadow.activeElement;
     if (!active || !active.classList.contains('mask-input')) return;
-    var selection = window.getSelection();
+    var selection = practiceSelection();
     if (!selection || !selection.rangeCount) return;
     var range = selection.getRangeAt(0);
     if (!active.contains(range.commonAncestorContainer) && range.commonAncestorContainer !== active) {
@@ -803,7 +826,7 @@
     var active = shadow.activeElement;
     if (!active || !active.classList.contains('mask-input')) return null;
 
-    var selection = window.getSelection();
+    var selection = practiceSelection();
     if (selection && selection.rangeCount) {
       var range = selection.getRangeAt(0);
       if (active.contains(range.commonAncestorContainer) || range.commonAncestorContainer === active) {
@@ -833,7 +856,7 @@
     if (!snapshotSelection) return;
     try {
       snapshotSelection.input.focus({ preventScroll: true });
-      var selection = window.getSelection();
+      var selection = practiceSelection();
       selection.removeAllRanges();
       selection.addRange(snapshotSelection.range);
       savePracticeSelection();
@@ -1012,6 +1035,27 @@
       toggleInkPalette();
     });
 
+    var slash = document.createElement('button');
+    slash.type = 'button';
+    slash.className = 'practice-slash';
+    slash.textContent = '斜线';
+    slash.title = '选中文字后添加 / 取消斜线';
+    slash.setAttribute('aria-pressed', 'false');
+    slash.disabled = true;
+    slash.addEventListener('pointerdown', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    slash.addEventListener('mousedown', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    slash.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleTextSlash();
+    });
+
     var compare = document.createElement('button');
     compare.type = 'button';
     compare.className = 'practice-compare';
@@ -1045,6 +1089,7 @@
     bar.appendChild(label);
     bar.appendChild(seekHint);
     bar.appendChild(ink);
+    bar.appendChild(slash);
     bar.appendChild(compare);
     bar.appendChild(clear);
     bar.appendChild(end);
@@ -1056,6 +1101,38 @@
     clear.textContent = clearArmed ? '确认清空' : '清空';
     if (clearArmed) clear.classList.add('is-armed');
     return bar;
+  }
+
+  function selectedPracticeRange() {
+    var input = activePracticeInput();
+    var selection = practiceSelection();
+    if (!input || !selection || !selection.rangeCount) return null;
+    var range = selection.getRangeAt(0);
+    if (range.collapsed || !input.contains(range.commonAncestorContainer)) return null;
+    return { input: input, range: range.cloneRange() };
+  }
+
+  function updateSlashButton() {
+    if (!shadow) return;
+    var button = shadow.querySelector('.practice-slash');
+    if (!button) return;
+    var selection = !peekMode && selectedPracticeRange();
+    var active = Boolean(selection && document.queryCommandState('strikeThrough'));
+    button.disabled = !selection;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  }
+
+  function toggleTextSlash() {
+    var selection = selectedPracticeRange();
+    if (!selection || peekMode) return;
+    closeInkPalette();
+    restorePracticeSelection(selection);
+    // Semantic <strike> also works when the page CSP blocks generated inline styles.
+    document.execCommand('styleWithCSS', false, false);
+    document.execCommand('strikeThrough', false, null);
+    syncMaskText(currentMask(), selection.input);
+    savePracticeSelection();
   }
 
 
@@ -1228,6 +1305,7 @@
     }
     updateClearButton();
     updateInkIndicators();
+    updateSlashButton();
   }
 
   function updateClearButton() {
@@ -1293,7 +1371,7 @@
       if (!input) return;
       try {
         input.focus({ preventScroll: true });
-        var selection = window.getSelection();
+        var selection = practiceSelection();
         var range = document.createRange();
         range.selectNodeContents(input);
         range.collapse(false);
