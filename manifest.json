@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "幕帘 · 屏幕遮罩",
+  "short_name": "幕帘",
+  "version": "1.3.0",
+  "description": "在网页上放置可拖动、可缩放的长条遮罩；支持在遮罩上听写、多色订正并一键对照字幕。",
+  "minimum_chrome_version": "109",
+  "permissions": ["storage", "contextMenus", "scripting", "activeTab"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "幕帘 · 屏幕遮罩",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*", "file:///*"],
+      "js": ["shared/common.js", "content/content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "commands": {
+    "toggle-overlay": {
+      "suggested_key": {
+        "default": "Alt+Shift+B",
+        "mac": "Alt+Shift+B"
+      },
+      "description": "显示或隐藏当前网站的遮罩"
+    },
+    "toggle-edit": {
+      "suggested_key": {
+        "default": "Alt+Shift+E",
+        "mac": "Alt+Shift+E"
+      },
+      "description": "进入或退出遮罩编辑模式"
+    },
+    "add-mask": {
+      "suggested_key": {
+        "default": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
+      },
+      "description": "添加一条新遮罩"
+    },
+    "toggle-practice": {
+      "suggested_key": {
+        "default": "Alt+Shift+P",
+        "mac": "Alt+Shift+P"
+      },
+      "description": "开始或结束遮罩上的听写练习"
+    }
+  }
+}

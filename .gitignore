@@ -1,0 +1,21 @@
+# 忽略 video 目录全部内容
+video/
+
+# 下面是浏览器插件项目常用的补充忽略项，按需保留
+# 依赖、构建产物
+node_modules/
+dist/
+build/
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
